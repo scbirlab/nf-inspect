@@ -2,3 +2,4 @@
 work/*
 /test/outputs/
 /test/work/
+~$*.xlsx
