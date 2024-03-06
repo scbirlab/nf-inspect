@@ -1,0 +1,25 @@
+
+name: Nextflow test
+
+on: [push]
+
+jobs:
+  test:
+
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+    - uses: actions/checkout@v3
+    - uses: conda-incubator/setup-miniconda@v2
+      with:
+        python-version: 3.11
+        mamba-version: "*"
+        channels: conda-forge,defaults
+        channel-priority: true
+    - uses: nf-core/setup-nextflow@v1
+    - name: Test Nextflow pipeline
+      run: |
+          nextflow run ${GITHUB_WORKSPACE} -c test/nextflow.config -process.executor=local
