@@ -1,13 +1,21 @@
 # 🧬🔍 INSPECT pipeline
 
-Nextflow pipeline to process demultiplexed Illumina paired-end 
-FASTQ files from INSPECT experiments.
+![GitHub Workflow Status (with branch)](https://img.shields.io/github/actions/workflow/status/scbirlab/nf-inspect/nf-test.yml)
+[![Nextflow](https://img.shields.io/badge/nextflow%20DSL2-%E2%89%A523.10.0-23aa62.svg)](https://www.nextflow.io/)
+[![run with conda](https://img.shields.io/badge/run%20with-conda-3EB049?labelColor=000000&logo=anaconda)](https://docs.conda.io/en/latest/)
+
+**scbirlab/nf-inspect** is a Nextflow pipeline to process demultiplexed Illumina 
+paired-end FASTQ files from INSPECT experiments.
+
+**Table of contents**
 
 - [Processing steps](#processing-steps)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
 - [Inputs](#inputs)
 - [Outputs](#outputs)
+- [Issues, problems, suggestions](#issues-problems-suggestions)
+- [Further help](#further-help)
 
 ## Processing steps
 
