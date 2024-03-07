@@ -22,4 +22,4 @@ jobs:
     - uses: nf-core/setup-nextflow@v1
     - name: Test Nextflow pipeline
       run: |
-          nextflow run ${GITHUB_WORKSPACE} -c test/nextflow.config -process.executor=local
+          nextflow run ${GITHUB_WORKSPACE} -c test/nextflow.config -profile=gh

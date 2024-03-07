@@ -148,17 +148,18 @@ workflow {
    TRIM_CUTADAPT.out.main | UMITOOLS_EXTRACT
 
    reference_ch | BUILD_CUTADAPT_REF 
-   UMITOOLS_EXTRACT.out.main.combine( BUILD_CUTADAPT_REF.out, 
+   UMITOOLS_EXTRACT.out.main.combine( BUILD_CUTADAPT_REF.out.fastas, 
                                       by: 0 ) | CUTADAPT_DEMUX
 
-   CUTADAPT_DEMUX.out.main | FASTQ2TAB | READS_PER_UMI_AND_PER_GUIDE
+   CUTADAPT_DEMUX.out.main | FASTQ2TAB | READS_PER_UMI_AND_PER_CLONE
    
    FASTQ2TAB.out | UMITOOLS_COUNT_TAB
-   UMITOOLS_COUNT_TAB.out.main | COUNTS_PER_GUIDE
+   UMITOOLS_COUNT_TAB.out.main.combine( BUILD_CUTADAPT_REF.out.combos, 
+                                        by: 0 ) | COUNTS_PER_GUIDE
 
-   COUNTS_PER_GUIDE.out.combine( READS_PER_UMI_AND_PER_GUIDE.out, 
-                                 by: 0 ).combine( UMITOOLS_COUNT_TAB.out.main,
-                                                  by: 0 ) | PLOTS
+   COUNTS_PER_GUIDE.out.main.combine( READS_PER_UMI_AND_PER_CLONE.out, 
+                                      by: 0 ).combine( UMITOOLS_COUNT_TAB.out.main_to_plot,
+                                                       by: 0 ) | PLOTS
 
    TRIM_CUTADAPT.out.logs.concat(
          CUTADAPT_DEMUX.out.logs,
@@ -174,8 +175,7 @@ workflow {
 // Do quality control checks
 process FASTQC {
 
-   cpus 4
-   memory '32GB'
+   label 'big_mem'
 
    tag "${sample_id}" 
 
@@ -188,7 +188,7 @@ process FASTQC {
    script:
    """
    zcat ${reads} > ${sample_id}.fastqc.fastq
-   fastqc --noextract --memory 10000 --threads 4 ${sample_id}.fastqc.fastq
+   fastqc --noextract --memory 10000 --threads 8 ${sample_id}.fastqc.fastq
    rm ${sample_id}.fastqc.fastq
    """
 
@@ -336,7 +336,8 @@ process BUILD_CUTADAPT_REF {
    tuple val( reference_id ), path( guideA ), path( promoters ), path( guideB )
 
    output:
-   tuple val( reference_id ), path( "*.fasta" )
+   tuple val( reference_id ), path( "*.fasta" ), emit: fastas
+   tuple val( reference_id ), path( "*.txt" ), emit: combos
 
    script:
    """
@@ -370,7 +371,18 @@ process BUILD_CUTADAPT_REF {
    
    awk 'BEGIN{ FS=","; OFS=ARGV[1]; ARGV[1]="" }; NR>1 { print ">"\$1"|"\$3,\$4\$2 }' \$'\\n' referenceB.csv \
          > referenceB.fasta
-   
+
+   # generate all unique combos
+   join -t, --header ${guideA}.x.tsv ${promoters}.x.tsv \
+      | join -t, --header - ${guideB}.rc.csv.x.tsv \
+      | cut -d, -f 2- \
+      > reference-combo.csv
+
+   cat \
+      <(printf 'guide_name\\n') \
+      <(awk 'BEGIN{ FS="," }; NR>1 { print \$1"|"\$3"@"\$3"|"\$5 }' reference-combo.csv) \
+      > reference-combo.txt
+
    """
 }
 
@@ -379,8 +391,7 @@ process CUTADAPT_DEMUX {
 
    tag "${sample_id}-${reference_id}" 
 
-   cpus 4
-   memory '32 GB'
+   label 'big_mem'
    time '6h'
 
    publishDir( path: mapped_o, 
@@ -430,7 +441,7 @@ process FASTQ2TAB {
    tuple val( reference_id ), val( sample_id ), path( fastqs )
 
    output:
-   tuple val( sample_id ), path( "*.tab.tsv" )
+   tuple val( reference_id ), val( sample_id ), path( "*.tab.tsv" )
 
    script:
    """
@@ -444,39 +455,6 @@ process FASTQ2TAB {
 }
 
 
-process READS_PER_UMI_AND_PER_GUIDE {
-
-   tag "${sample_id}"
-
-   publishDir( counts_o, 
-               mode: 'copy' )
-
-   input:
-   tuple val( sample_id ), path( tabfile )
-
-   output:
-   tuple val( sample_id ), path( "*.umi.tsv" ), path( "*.clone_bc.tsv" )
-
-   script:
-   """
-   cut -f1 ${tabfile} | cut -d _ -f3 | sort | uniq -c | sort -k1 > umi.tsv
-   cut -f1 ${tabfile} | cut -d _ -f2 | sort | uniq -c | sort -k1 > clone_bc.tsv
-
-   for f in umi.tsv clone_bc.tsv
-   do
-      BASENAME=\$(basename \$f .tsv)
-      NLINES=\$(cat \$f | wc -l)
-
-      cat \
-         <(printf 'sample_id\\t'\$BASENAME'_count\\t'\$BASENAME'\\n') \
-         <(paste <(yes ${sample_id} | head -n \$NLINES) \$f) \
-         > ${sample_id}.\$BASENAME.tsv
-   done
-
-   """
-}
-
-
 // Count unique UMIs per cell per gene
 process UMITOOLS_COUNT_TAB {
 
@@ -486,11 +464,12 @@ process UMITOOLS_COUNT_TAB {
                mode: 'copy' )
 
    input:
-   tuple val( sample_id ), path( tabfile )
+   tuple val( reference_id ), val( sample_id ), path( tabfile )
 
    output:
-   tuple val( sample_id ), path( "*.umitools_count.tsv" ), emit: main
-   tuple val( sample_id ), path( "*.umitools_count.log" )
+   tuple val( reference_id ), val( sample_id ), path( "*.umitools_count.tsv" ), emit: main
+   tuple val( sample_id ), path( "*.umitools_count.tsv" ), emit: main_to_plot
+   tuple val( reference_id ), val( sample_id ), path( "*.umitools_count.log" ), emit: logs
 
    script:
    """
@@ -513,41 +492,94 @@ process UMITOOLS_COUNT_TAB {
 }
 
 
-process COUNTS_PER_GUIDE {
+process READS_PER_UMI_AND_PER_CLONE {
 
-   tag "${sample_id}"
+   tag "${sample_id} - ${reference_id}"
 
    publishDir( counts_o, 
                mode: 'copy' )
 
    input:
-   tuple val( sample_id ), path( countfile )
+   tuple val( reference_id ), val( sample_id ), path( tabfile )
 
    output:
-   tuple val( sample_id ), path( "*.tsv" )
+   tuple val( sample_id ), path( "*.umi.tsv" ), path( "*.clone_bc.tsv" )
+
+   script:
+   """
+   cut -f1 ${tabfile} | cut -d _ -f3 > umi.tsv
+   cut -f1 ${tabfile} | cut -d _ -f2 > clone_bc.tsv
+
+   for f in umi.tsv clone_bc.tsv
+   do
+      BASENAME=\$(basename \$f .tsv)
+      NLINES=\$(cat \$f | wc -l)
+
+      printf 'sample_id\\t'\$BASENAME'_count\\t'\$BASENAME'\\n' > ${sample_id}.\$BASENAME.tsv
+
+      sort \$f | uniq -c \
+         | awk -F' ' '{ print ${sample_id}"\\t"\$1"\\t"\$2}' \
+         | sort -k1 -n \
+         >> ${sample_id}.\$BASENAME.tsv
+   done
+
+   """
+}
+
+
+process COUNTS_PER_GUIDE {
+
+   tag "${sample_id}-${reference_id}"
+
+   publishDir( counts_o, 
+               mode: 'copy' )
+
+   input:
+   tuple val( reference_id ), val( sample_id ), path( countfile ), path( combos )
+
+   output:
+   tuple val( sample_id ), path( "*.per-guide.tsv" ), emit: main
+   tuple val( sample_id ), path( "*.unexpected-guides.tsv" ), emit: unexpected
 
    script:
    """
    #!/usr/bin/env python
 
+   import sys
+
    import pandas as pd
    
    df = pd.read_csv("${countfile}", sep='\\s+')
+   combos = pd.read_csv("${combos}", sep='\\s+')
 
    grouped =  df.groupby('guide_name')
    results = []
 
    for guide_name, data in grouped:
-      count_df = pd.DataFrame(dict(sample_id=["${sample_id}"],
-                                   guide_name=[guide_name],
+      count_df = pd.DataFrame(dict(guide_name=[guide_name],
                                    clone_count=[data.shape[0]],
                                    umi_count=[data['umi_count'].sum()]))
       results.append(count_df)
 
-   results = (pd.concat(results, axis=0)
-               .assign(mean_umis_per_clone=lambda x: x['umi_count'] / x['clone_count'])
-               .sort_values('mean_umis_per_clone', ascending=False)
-               .to_csv('${sample_id}.counts-per-guide.tsv', sep='\\t', index=False))
+   results = pd.concat(results, axis=0)
+   print(results.head(), file=sys.stderr)
+   unmerged_guides = results['guide_name'].copy().unique()
+
+   results = (results.merge(combos, on='guide_name', how='right')
+                .fillna(0.)
+                .assign(mean_umis_per_clone=lambda x: x['umi_count'] / x['clone_count'],
+                        sample_id="${sample_id}")
+                .sort_values('mean_umis_per_clone', ascending=False))
+   results.to_csv('${sample_id}.per-guide.tsv', sep='\\t', index=False)
+   merged_guides = results['guide_name'].copy().unique()
+
+   guide_diff = sorted(set(unmerged_guides) - set(merged_guides))
+
+   print(f"There were {len(guide_diff)} unexpected guides!", 
+         file=sys.stderr)
+   (pd.DataFrame(dict(unexpected_guides=guide_diff))
+      .to_csv('${sample_id}.unexpected-guides.tsv', sep='\\t', index=False))
+
    """
 }
 
@@ -577,15 +609,29 @@ process PLOTS {
 
    def loghist(df, col, bins=40, *args, **kwargs):
 
-      _min = df[col].min()
+      # df = df[df[col].astype(str).str.isnumeric()].copy()
+      # df[col] = df[col].astype(float)
+      _min = df.query(f"{col} > 0.")[col].min()
       _max = max(_min + 1, df[col].max())
 
       bins = np.geomspace(_min, _max, num=bins)
-      ax.hist(df[col], 
-              bins=bins, histtype='stepfilled')
+      counts, bins, patches = ax.hist(df[col], 
+                                      bins=bins, 
+                                      histtype='stepfilled', 
+                                      color='#33BBEE')
+
       ax.set(xlabel=col, 
              ylabel="Frequency",
              xscale='log', *args, **kwargs)
+
+      max_count = max(counts)
+      zero_count = (df[col] == 0.).sum()
+      if zero_count > 0 and (zero_count / max_count) < 5.:
+         ax.axhline(zero_count, 
+                    color='lightgrey',
+                    zorder=-5)
+      
+      ax.set_title(ax.get_title() + f'\\nNo. zeroes: {zero_count}')
 
       return ax
 
@@ -594,7 +640,7 @@ process PLOTS {
                 per_umis="${umi_counts}", 
                 per_clone_bc="${clone_counts}",
                 per_guides_per_clone="${clone_guide_counts}")
-   dfs = {name: pd.read_csv(f, sep='\\s+') 
+   dfs = {name: pd.read_csv(f, sep='\\t') 
           for name, f in files.items()}
 
    panel_size = 3.5
@@ -616,17 +662,19 @@ process PLOTS {
       
    fig.savefig('${sample_id}.histograms.png', dpi=600, bbox_inches='tight')
 
-   cols_to_plot = ('clone_count', 'umi_count', 'mean_umis_per_clone')
+   name = 'per_guides'
+   df = dfs[name]
+   cols_to_plot = ['clone_count', 'umi_count', 'mean_umis_per_clone'] #df.columns[-3:].tolist()
+   print(df[~df['mean_umis_per_clone'].astype(str).str.isnumeric()], file=sys.stderr)
    n_rows, n_cols = 1, len(cols_to_plot)
    fig, axes = plt.subplots(n_rows, n_cols, 
                             figsize=(n_cols * panel_size, n_rows * panel_size),
                             layout='constrained')
 
-   name = 'per_guides'
    for ax, count_col in zip(axes, cols_to_plot):
 
       print(f"Plotting {name} : {count_col}...", file=sys.stderr)
-      ax = loghist(dfs[name], count_col, bins=n_bins, 
+      ax = loghist(df, count_col, bins=n_bins, 
                    title=f"${sample_id}\\n{name}")
 
    fig.savefig('${sample_id}.histograms-per-guide-per-clone.png', dpi=600, bbox_inches='tight')
