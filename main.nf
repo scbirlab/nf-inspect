@@ -36,9 +36,9 @@ if ( params.help ) {
             reference            Path to directory containing references to map to.
 
          Optional parameters (with defaults):
-            trim_qual = 10             For `cutadapt`, the minimum Phred score for trimming 3' calls
-            min_length = 11            For `cutadapt`, the minimum trimmed length of a read. Shorter reads will be discarded
-            umitools_error = 4         For `umitools`, the number of errors allowed to correct cell barcodes
+            trim_qual = ${params.trim_qual}             For `cutadapt`, the minimum Phred score for trimming 3' calls
+            min_length = ${params.min_length}           For `cutadapt`, the minimum trimmed length of a read. Shorter reads will be discarded
+            umitools_error = ${params.umitools_error}         For `umitools`, the number of errors allowed to correct cell barcodes
 
          The parameters can be provided either in the `nextflow.config` file or on the `nextflow run` command.
    
