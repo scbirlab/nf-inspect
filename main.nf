@@ -92,7 +92,7 @@ log.info """\
          .stripIndent()
 
 log.info  """
-         Making directories: 
+          Making directories: 
           """.stripIndent()
 
 dirs_to_make.each { 
@@ -530,6 +530,8 @@ process READS_PER_UMI_AND_PER_CLONE {
 process COUNTS_PER_GUIDE {
 
    tag "${sample_id}-${reference_id}"
+
+   label 'big_mem'
 
    publishDir( counts_o, 
                mode: 'copy' )
