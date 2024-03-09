@@ -7,12 +7,11 @@ channels:
 dependencies:
     - python
     - pip
-    - cutadapt
     - fastqc
-    - multiqc
-    - openjdk
     - umi_tools
     - pip:
+        - cutadapt
         - matplotlib
+        - multiqc
         - numpy
         - pandas
