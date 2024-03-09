@@ -1,13 +1,13 @@
 name: nf-inspect
 
 channels:
-    - conda-forge
+    - defaults
     - bioconda
 
 dependencies:
-    - python
+    - python=3.10
     - pip
-    - fastqc
+    - bioconda::fastqc
     - umi_tools
     - pip:
         - cutadapt
