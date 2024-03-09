@@ -255,7 +255,8 @@ process TRIM_CUTADAPT {
 // Identify cell barcodes
 process UMITOOLS_WHITELIST {
 
-   time '6h'
+   label 'big_mem'
+   time '24h'
 
    tag "${sample_id}"
 
@@ -515,11 +516,12 @@ process READS_PER_UMI_AND_PER_CLONE {
       BASENAME=\$(basename \$f .tsv)
       NLINES=\$(cat \$f | wc -l)
 
-      printf 'sample_id\\t'\$BASENAME'_count\\t'\$BASENAME'\\n' > ${sample_id}.\$BASENAME.tsv
+      printf 'sample_id\\t'\$BASENAME'\\t'\$BASENAME'_count\\n' \
+         > ${sample_id}.\$BASENAME.tsv
 
       sort \$f | uniq -c \
-         | awk -F' ' '{ print ${sample_id}"\\t"\$1"\\t"\$2}' \
-         | sort -k1 -n \
+         | awk -F' ' '{ print "${sample_id}\\t"\$2"\\t"\$1 }' \
+         | sort -k3 -n \
          >> ${sample_id}.\$BASENAME.tsv
    done
 
@@ -551,8 +553,8 @@ process COUNTS_PER_GUIDE {
 
    import pandas as pd
    
-   df = pd.read_csv("${countfile}", sep='\\s+')
-   combos = pd.read_csv("${combos}", sep='\\s+')
+   df = pd.read_csv("${countfile}", sep='\\t')
+   combos = pd.read_csv("${combos}", sep='\\t')
 
    grouped =  df.groupby('guide_name')
    results = []
