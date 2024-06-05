@@ -210,7 +210,7 @@ process TRIM_CUTADAPT {
 
    output:
    tuple val( sample_id ), val( reference_id ), val( adapters ), val( umis ), path( "*.trimmed.fastq.gz" ), emit: main
-   tuple path( "*.log" ),  path( "*.json" ), emit: logs
+   path "*.log", emit: logs
 
    script:
    """
@@ -229,7 +229,6 @@ process TRIM_CUTADAPT {
 		--discard-untrimmed \
 		-o ${sample_id}_R1.trimmed3.fastq.gz \
       -p ${sample_id}_R2.trimmed3.fastq.gz \
-      --json ${sample_id}.3prime.cutadapt.json \
 		${sample_id}_R?.fastq.gz \
       > ${sample_id}.3prime.cutadapt.log
 
@@ -242,7 +241,6 @@ process TRIM_CUTADAPT {
 		--discard-untrimmed \
 		-o ${sample_id}_R1.trimmed.fastq.gz \
       -p ${sample_id}_R2.trimmed.fastq.gz \
-      --json ${sample_id}.5prime.cutadapt.json \
 		${sample_id}_R?.trimmed3.fastq.gz \
       > ${sample_id}.5prime.cutadapt.log
 
@@ -344,18 +342,20 @@ process BUILD_CUTADAPT_REF {
    """
    for f in ${promoters} ${guideB}
    do
+      fclean=\$f.clean
+      cat \$f | tr \$'\r' \$'\n' | grep -v '^\$' > \$fclean
       cat \
-         <(head -n1 \$f) \
+         <(head -n1 \$fclean) \
          <(paste -d, \
-            <(cut -d, -f1 <(tail -n+2 \$f)) \
-            <(cut -d, -f2 <(tail -n+2 \$f) \
+            <(cut -d, -f1 <(tail -n+2 \$fclean)) \
+            <(cut -d, -f2 <(tail -n+2 \$fclean) \
                | tr ATCGatcg TAGCtagc | rev)) \
          > \$f.rc.csv
    done   
 
    for f in ${guideA} ${promoters} ${promoters}.rc.csv ${guideB}.rc.csv
    do
-      cat \$f | tr -d '\r' | sed 's/^/lib_1,/' \
+      cat \$f | tr \$'\r' \$'\n' | grep -v '^\$' | sed 's/^/lib_1,/' \
       > \$f.x.tsv
    done
 
@@ -364,7 +364,7 @@ process BUILD_CUTADAPT_REF {
       > referenceA.csv
 
    awk 'BEGIN{ FS=","; OFS=ARGV[1]; ARGV[1]="" }; NR>1 { print ">"\$1"|"\$3,\$2\$4 }' \$'\\n' referenceA.csv \
-         > referenceA.fasta
+      > referenceA.fasta
 
    join -t, --header ${promoters}.rc.csv.x.tsv ${guideB}.rc.csv.x.tsv \
       | cut -d, -f 2- \
