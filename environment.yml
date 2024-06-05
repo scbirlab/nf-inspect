@@ -1,17 +1,17 @@
 name: nf-inspect
 
 channels:
-    - defaults
+    - conda-forge
     - bioconda
 
 dependencies:
-    - python=3.10
+    - python>=3.8
     - pip
     - bioconda::fastqc
-    - umi_tools
+    - umi_tools>=1.0
     - pip:
-        - cutadapt
+        - 'cutadapt>=4.0'
         - matplotlib
-        - multiqc
+        - 'multiqc>=1.21'
         - numpy
         - pandas
