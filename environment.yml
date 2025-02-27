@@ -5,13 +5,13 @@ channels:
     - bioconda
 
 dependencies:
-    - python>=3.8
+    - python=3.11
     - pip
     - bioconda::fastqc
-    - umi_tools>=1.0
     - pip:
         - 'cutadapt>=4.0'
         - matplotlib
         - 'multiqc>=1.21'
         - numpy
-        - pandas
+        - 'pandas>=2.1.2'
+        - 'umi_tools>=1.0'

@@ -151,23 +151,23 @@ workflow {
    UMITOOLS_EXTRACT.out.main.combine( BUILD_CUTADAPT_REF.out.fastas, 
                                       by: 0 ) | CUTADAPT_DEMUX
 
-   CUTADAPT_DEMUX.out.main | FASTQ2TAB | READS_PER_UMI_AND_PER_CLONE
+   CUTADAPT_DEMUX.out.main | FASTQ2TAB | READS_PER_UMI_AND_PER_CLONE_AND_PER_GUIDE
    
    FASTQ2TAB.out | UMITOOLS_COUNT_TAB
    UMITOOLS_COUNT_TAB.out.main.combine( BUILD_CUTADAPT_REF.out.combos, 
                                         by: 0 ) | COUNTS_PER_GUIDE
 
-   COUNTS_PER_GUIDE.out.main.combine( READS_PER_UMI_AND_PER_CLONE.out, 
+   COUNTS_PER_GUIDE.out.main.combine( READS_PER_UMI_AND_PER_CLONE_AND_PER_GUIDE.out, 
                                       by: 0 ).combine( UMITOOLS_COUNT_TAB.out.main_to_plot,
                                                        by: 0 ) | PLOTS
 
-   TRIM_CUTADAPT.out.logs.concat(
-         CUTADAPT_DEMUX.out.logs,
-         FASTQC.out.logs )
-      .flatten()
-      .unique()
-      .collect() \
-      | MULTIQC
+   // TRIM_CUTADAPT.out.logs.concat(
+   //       CUTADAPT_DEMUX.out.logs,
+   //       FASTQC.out.logs )
+   //    .flatten()
+   //    .unique()
+   //    .collect() \
+   //    | MULTIQC
 
 }
 
@@ -198,7 +198,7 @@ process FASTQC {
 // Trim adapters from reads
 process TRIM_CUTADAPT {
 
-   time '6h'
+   time '24h'
 
    tag "${sample_id}"
 
@@ -206,16 +206,17 @@ process TRIM_CUTADAPT {
                mode: 'copy' )
 
    input:
-   tuple val( sample_id ), val( reference_id ), val( adapters ), val( umis ), path( reads )
-
+   tuple val( sample_id ), val( reference_id ), val( adapters ), val( umis ), path( reads, stageAs: "???/*" )
    output:
    tuple val( sample_id ), val( reference_id ), val( adapters ), val( umis ), path( "*.trimmed.fastq.gz" ), emit: main
    path "*.log", emit: logs
 
    script:
    """
-   ln -s ${reads[0]} ${sample_id}_R1.fastq.gz
-   ln -s ${reads[1]} ${sample_id}_R2.fastq.gz
+   for i in \$(seq 1 2)
+   do
+      zcat */*_R"\$i"*.fastq.gz | gzip --best > ${sample_id}_3prime_R"\$i".fastq.gz
+   done
 
    cutadapt \
 		-a '${adapters[0]}' \
@@ -227,9 +228,9 @@ process TRIM_CUTADAPT {
 		--report full \
       --action trim \
 		--discard-untrimmed \
-		-o ${sample_id}_R1.trimmed3.fastq.gz \
-      -p ${sample_id}_R2.trimmed3.fastq.gz \
-		${sample_id}_R?.fastq.gz \
+		-o ${sample_id}_5prime_R1.fastq.gz \
+      -p ${sample_id}_5prime_R2.fastq.gz \
+		${sample_id}_3prime_R?.fastq.gz \
       > ${sample_id}.3prime.cutadapt.log
 
    cutadapt \
@@ -241,10 +242,10 @@ process TRIM_CUTADAPT {
 		--discard-untrimmed \
 		-o ${sample_id}_R1.trimmed.fastq.gz \
       -p ${sample_id}_R2.trimmed.fastq.gz \
-		${sample_id}_R?.trimmed3.fastq.gz \
+		${sample_id}_5prime_R?.fastq.gz \
       > ${sample_id}.5prime.cutadapt.log
 
-   rm *.trimmed3.fastq.gz
+   rm *_?prime_R?.fastq.gz
 
    """
 }
@@ -451,7 +452,16 @@ process FASTQ2TAB {
       | tr ' ' \$'\t' \
       | cut -f1-2 \
       | sort -k2 \
+      > ${sample_id}.tab0.tsv
+   
+   # Hack because of bug in `umitools count_tab`. It expects read_id_UMI_CB 
+   # when `umitools extract` makes read_id_CB_UMI (!!!)
+   f=${sample_id}.tab0.tsv
+   paste <(paste -d_ <(cut -d_ -f1 \$f) <(cut -f1 \$f | cut -d_ -f3) <(cut -d_ -f2 \$f)) \
+      <(cut -f2 \$f) \
       > ${sample_id}.tab.tsv
+
+   rm \$f
    """
 }
 
@@ -460,6 +470,9 @@ process FASTQ2TAB {
 process UMITOOLS_COUNT_TAB {
 
    tag "${sample_id}"
+
+   label 'big_mem'
+   time '48h'
 
    publishDir( counts_o, 
                mode: 'copy' )
@@ -480,20 +493,43 @@ process UMITOOLS_COUNT_TAB {
       --stdout ${sample_id}.umitools_count0.tsv \
       --log ${sample_id}.umitools_count.log
 
-   tail -n+2 ${sample_id}.umitools_count0.tsv > ${sample_id}.umitools_count0.tsv.tail
+   tail -n+2 ${sample_id}.umitools_count0.tsv \
+      | sed 's/^b'\\''//;s/'\\''\\t/\\t/' \
+      > ${sample_id}.umitools_count0.tsv.tail
    NLINES=\$(cat ${sample_id}.umitools_count0.tsv.tail | wc -l)
 
-   cat \
-      <(printf 'sample_id\\tclone_bc\\tguide_name\\tumi_count\\n') \
-      <(paste <(yes ${sample_id} | head -n \$NLINES) ${sample_id}.umitools_count0.tsv.tail) \
+   printf 'clone_bc.guide_name\\tsample_id\\tclone_bc\\tguide_name\\tumi_count\\n' \
+      > ${sample_id}.umitools_count-a.tsv
+   paste \
+      <(cut -f1-2 ${sample_id}.umitools_count0.tsv.tail | tr \$'\\t' .) \
+      <(yes ${sample_id} | head -n \$NLINES) \
+      ${sample_id}.umitools_count0.tsv.tail \
+      | sort -k1 \
+      >> ${sample_id}.umitools_count-a.tsv
+
+   paste -d. <(cut -f1 ${tabfile} | cut -d_ -f3) \
+      <(cut -f2 ${tabfile}) \
+      > ${sample_id}.read_count0.tsv
+
+   printf 'clone_bc.guide_name\\tread_count\\n' \
+      > ${sample_id}.read_count.tsv
+   sort ${sample_id}.read_count0.tsv \
+      | uniq -c \
+      | awk -F' ' -v OFS=\$'\\t' '{ print \$2,\$1 }' \
+      | sort -k1 \
+      >> ${sample_id}.read_count.tsv
+
+   join --header ${sample_id}.umitools_count-a.tsv ${sample_id}.read_count.tsv \
+      | tr ' ' \$'\\t' \
+      | cut -f2- \
       > ${sample_id}.umitools_count.tsv
 
-   rm ${sample_id}.umitools_count0.tsv.tail
+   rm ${sample_id}.umitools_count0.tsv.tail ${sample_id}.read_count0.tsv
    """
 }
 
 
-process READS_PER_UMI_AND_PER_CLONE {
+process READS_PER_UMI_AND_PER_CLONE_AND_PER_GUIDE {
 
    tag "${sample_id} - ${reference_id}"
 
@@ -504,19 +540,20 @@ process READS_PER_UMI_AND_PER_CLONE {
    tuple val( reference_id ), val( sample_id ), path( tabfile )
 
    output:
-   tuple val( sample_id ), path( "*.umi.tsv" ), path( "*.clone_bc.tsv" )
+   tuple val( sample_id ), path( "*.umi.tsv" ), path( "*.clone_bc.tsv" ), path( "*.guide_name.tsv" )
 
    script:
    """
-   cut -f1 ${tabfile} | cut -d _ -f3 > umi.tsv
-   cut -f1 ${tabfile} | cut -d _ -f2 > clone_bc.tsv
+   cut -f1 ${tabfile} | cut -d _ -f2 > umi.tsv
+   cut -f1 ${tabfile} | cut -d _ -f3 > clone_bc.tsv
+   cut -f2 ${tabfile} > guide_name.tsv
 
-   for f in umi.tsv clone_bc.tsv
+   for f in umi.tsv clone_bc.tsv guide_name.tsv
    do
       BASENAME=\$(basename \$f .tsv)
       NLINES=\$(cat \$f | wc -l)
 
-      printf 'sample_id\\t'\$BASENAME'\\t'\$BASENAME'_count\\n' \
+      printf 'sample_id\\t'\$BASENAME'\\t'\$BASENAME'_read_count\\n' \
          > ${sample_id}.\$BASENAME.tsv
 
       sort \$f | uniq -c \
@@ -562,7 +599,8 @@ process COUNTS_PER_GUIDE {
    for guide_name, data in grouped:
       count_df = pd.DataFrame(dict(guide_name=[guide_name],
                                    clone_count=[data.shape[0]],
-                                   umi_count=[data['umi_count'].sum()]))
+                                   umi_count=[data['umi_count'].sum()],
+                                   read_count=[data['read_count'].sum()]))
       results.append(count_df)
 
    results = pd.concat(results, axis=0)
@@ -572,6 +610,8 @@ process COUNTS_PER_GUIDE {
    results = (results.merge(combos, on='guide_name', how='right')
                 .fillna(0.)
                 .assign(mean_umis_per_clone=lambda x: x['umi_count'] / x['clone_count'],
+                        mean_reads_per_umi=lambda x: x['read_count'] / x['umi_count'],
+                        mean_reads_per_clone=lambda x: x['read_count'] / x['clone_count'],
                         sample_id="${sample_id}")
                 .sort_values('mean_umis_per_clone', ascending=False))
    results.to_csv('${sample_id}.per-guide.tsv', sep='\\t', index=False)
@@ -596,7 +636,7 @@ process PLOTS {
                mode: 'copy' )
 
    input:
-   tuple val( sample_id ), path( guide_counts ), path( umi_counts ), path( clone_counts ), path( clone_guide_counts )
+   tuple val( sample_id ), path( guide_umi_counts ), path( umi_reads ), path( clone_reads ), path( guide_reads ), path( clone_guide_counts )
 
    output:
    tuple val( sample_id ), path( "*.png" )
@@ -640,9 +680,9 @@ process PLOTS {
       return ax
 
    
-   files = dict(per_guides="${guide_counts}", 
-                per_umis="${umi_counts}", 
-                per_clone_bc="${clone_counts}",
+   files = dict(per_guides="${guide_umi_counts}", 
+                per_umis="${umi_reads}", 
+                per_clone_bc="${clone_reads}",
                 per_guides_per_clone="${clone_guide_counts}")
    dfs = {name: pd.read_csv(f, sep='\\t') 
           for name, f in files.items()}
@@ -688,6 +728,9 @@ process PLOTS {
 
 // Make log report
 process MULTIQC {
+
+   label 'big_mem'
+   time '12 h'
 
    publishDir( multiqc_o, 
                mode: 'copy' )
