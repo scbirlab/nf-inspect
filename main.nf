@@ -527,30 +527,31 @@ process UMITOOLS_COUNT_TAB {
    NLINES=\$(cat ${sample_id}.umitools_count0.tsv | wc -l)
 
    printf 'clone_bc.guide_name\\tsample_id\\tclone_bc\\tguide_name\\tumi_count\\n' \
-      > ${sample_id}.umitools_count-a.tsv
+   > ${sample_id}.umitools_count-a.tsv
    paste \
       <(cut -f1-2 ${sample_id}.umitools_count0.tsv | tr \$'\\t' .) \
       <(yes ${sample_id} | head -n \$NLINES) \
-      ${sample_id}.umitools_count0.tsv.tail \
-      | sort -k1 \
-      >> ${sample_id}.umitools_count-a.tsv
+      ${sample_id}.umitools_count0.tsv \
+   | sort -k1 \
+   >> ${sample_id}.umitools_count-a.tsv
 
-   paste -d. <(cut -f1 ${tabfile} | cut -d_ -f3) \
+   paste -d. \
+      <(cut -f1 ${tabfile} | cut -d_ -f2) \
       <(cut -f2 ${tabfile}) \
-      > ${sample_id}.read_count0.tsv
+   > ${sample_id}.read_count0.tsv
 
    printf 'clone_bc.guide_name\\tread_count\\n' \
-      > ${sample_id}.read_count.tsv
+   > ${sample_id}.read_count.tsv
    sort ${sample_id}.read_count0.tsv \
-      | uniq -c \
-      | awk -F' ' -v OFS=\$'\\t' '{ print \$2,\$1 }' \
-      | sort -k1 \
-      >> ${sample_id}.read_count.tsv
+   | uniq -c \
+   | awk -F' ' -v OFS=\$'\\t' '{ print \$2,\$1 }' \
+   | sort -k1 \
+   >> ${sample_id}.read_count.tsv
 
    join --header ${sample_id}.umitools_count-a.tsv ${sample_id}.read_count.tsv \
       | tr ' ' \$'\\t' \
       | cut -f2- \
-      > ${sample_id}.umitools_count.tsv
+   > ${sample_id}.umitools_count.tsv
 
    rm ${sample_id}.read_count0.tsv
    """
@@ -775,10 +776,13 @@ process PLOT_READS_VS_UMIS {
    from carabiner.mpl import figsaver, scattergrid
    import pandas as pd
    
-   df = pd.read_csv(
-      "${guide_umi_counts}", 
-      sep='\\t',
-   ) 
+   df = (
+      pd.read_csv(
+         "${guide_umi_counts}", 
+         sep='\\t',
+      )
+      .query("read_count > 0 and umi_count > 0")
+   )
 
    fig, axes = scattergrid(
       df,
