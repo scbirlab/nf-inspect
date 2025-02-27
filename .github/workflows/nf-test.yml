@@ -22,5 +22,5 @@ jobs:
         with:
           version: 24.04.4
       - name: Test Nextflow pipeline
-      run: |
+        run: |
           nextflow run ${GITHUB_WORKSPACE} -c test/nextflow.config -profile gh
