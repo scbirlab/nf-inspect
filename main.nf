@@ -176,7 +176,7 @@ workflow {
       .map { it[0..1] } 
    | PLOT_READS_VS_UMIS
 
-   TRIM_CUTADAPT.out.logs
+   TRIM_CUTADAPT.out.multiqc_logs
       .concat(
          CUTADAPT_DEMUX.out.multiqc_logs,
          FASTQC.out.multiqc_logs 
@@ -295,8 +295,8 @@ process UMITOOLS_WHITELIST {
 
    output:
    tuple path( "*.txt" ), val( sample_id ), emit: main
-   path( "*.log" ), emit: logs
    tuple path( "*.png" ), val( "*.tsv" ), emit: plots
+   path "*.log" , emit: logs
 
    script:
    """
