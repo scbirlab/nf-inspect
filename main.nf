@@ -524,12 +524,12 @@ process UMITOOLS_COUNT_TAB {
    #tail -n+2 ${sample_id}.umitools_count0.tsv \
    #   | sed 's/^b'\\''//;s/'\\''\\t/\\t/' \
    #   > ${sample_id}.umitools_count0.tsv.tail
-   NLINES=\$(cat ${sample_id}.umitools_count0.tsv.tail | wc -l)
+   NLINES=\$(cat ${sample_id}.umitools_count0.tsv | wc -l)
 
    printf 'clone_bc.guide_name\\tsample_id\\tclone_bc\\tguide_name\\tumi_count\\n' \
       > ${sample_id}.umitools_count-a.tsv
    paste \
-      <(cut -f1-2 ${sample_id}.umitools_count0.tsv.tail | tr \$'\\t' .) \
+      <(cut -f1-2 ${sample_id}.umitools_count0.tsv | tr \$'\\t' .) \
       <(yes ${sample_id} | head -n \$NLINES) \
       ${sample_id}.umitools_count0.tsv.tail \
       | sort -k1 \
@@ -552,7 +552,7 @@ process UMITOOLS_COUNT_TAB {
       | cut -f2- \
       > ${sample_id}.umitools_count.tsv
 
-   rm ${sample_id}.umitools_count0.tsv.tail ${sample_id}.read_count0.tsv
+   rm ${sample_id}.read_count0.tsv
    """
 }
 
