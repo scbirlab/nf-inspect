@@ -138,7 +138,7 @@ workflow {
              file( "${params.reference}/${it.guideB}",
                    checkIfExists: true) ) }
       .unique()
-      set { reference_ch }
+      .set { reference_ch }
 
    sample_ch | FASTQC 
 
@@ -435,6 +435,7 @@ process CUTADAPT_DEMUX {
    output:
    tuple val( reference_id ), val( sample_id ), path( "*.matched.fastq.gz" ), emit: main
    tuple path( "*.log" ),  path( "*.json" ), emit: logs
+   path "*.log", emit: multiqc_logs
 
    script:
    """
