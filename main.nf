@@ -10,6 +10,11 @@
 */
 
 nextflow.enable.dsl=2
+pipeline_title = """\
+                 S C B I R   I N S P E C T   P I P E L I N E
+                 ===========================================
+                 """
+                 .stripIndent()
 
 /*
 ========================================================================================
@@ -17,7 +22,7 @@ nextflow.enable.dsl=2
 ========================================================================================
 */
 if ( params.help ) {
-   println """\
+   println pipeline_title + """\
 
          S C B I R   I N S P E C T   P I P E L I N E
          ===========================================
@@ -71,9 +76,7 @@ multiqc_o = "${working_dir}/outputs/multi_qc"
 
 dirs_to_make = [processed_o, mapped_o, counts_o, multiqc_o]
 
-log.info """\
-         S C B I R   I N S P E C T   P I P E L I N E
-         ===========================================
+log.info pipeline_title + """\
          inputs
             sample sheet   : ${params.sample_sheet}
             fastq directory: ${params.fastq}
@@ -102,41 +105,40 @@ dirs_to_make.each {
 
 /*
 ========================================================================================
-   Create Channels
-========================================================================================
-*/
-
-csv_ch = Channel.fromPath( params.sample_sheet, 
-                           checkIfExists: true )
-                .splitCsv( header: true )
-
-sample_ch = csv_ch.map { tuple( it.sample_id, 
-                                "${it.guideA}-${it.promoters}-${it.guideB}",  // Reference ID
-                                tuple( it.adapter3_read1, 
-                                       it.adapter3_read2,
-                                       it.adapter5_read1, 
-                                       it.adapter5_read2 ),
-                                tuple( it.umi_read1, 
-                                       it.umi_read2 ),
-                                file( "${params.fastq}/*${it.fastq_pattern}*",
-                                      checkIfExists: true ).sort() ) }
-
-reference_ch = csv_ch.map { tuple( "${it.guideA}-${it.promoters}-${it.guideB}",  // Reference ID
-                                    file( "${params.reference}/${it.guideA}",
-                                          checkIfExists: true),
-                                    file( "${params.reference}/${it.promoters}",
-                                          checkIfExists: true),
-                                    file( "${params.reference}/${it.guideB}",
-                                          checkIfExists: true) ) }
-                      .unique()
-
-/*
-========================================================================================
    MAIN Workflow
 ========================================================================================
 */
 
 workflow {
+
+   Channel.fromPath( params.sample_sheet, 
+                     checkIfExists: true )
+      .splitCsv( header: true )
+      .set { csv_ch }
+
+   csv_ch
+      .map { tuple( it.sample_id, 
+                    "${it.guideA}-${it.promoters}-${it.guideB}",  // Reference ID
+                    tuple( it.adapter3_read1, 
+                           it.adapter3_read2,
+                           it.adapter5_read1, 
+                           it.adapter5_read2 ),
+                    tuple( it.umi_read1, 
+                           it.umi_read2 ),
+                    file( "${params.fastq}/*${it.fastq_pattern}*",
+                           checkIfExists: true ).sort() ) }
+      .set { sample_ch }
+
+   csv_ch
+      .map { tuple( "${it.guideA}-${it.promoters}-${it.guideB}",  // Reference ID
+             file( "${params.reference}/${it.guideA}",
+                   checkIfExists: true),
+             file( "${params.reference}/${it.promoters}",
+                   checkIfExists: true),
+             file( "${params.reference}/${it.guideB}",
+                   checkIfExists: true) ) }
+      .unique()
+      set { reference_ch }
 
    sample_ch | FASTQC 
 
@@ -148,26 +150,36 @@ workflow {
    TRIM_CUTADAPT.out.main | UMITOOLS_EXTRACT
 
    reference_ch | BUILD_CUTADAPT_REF 
-   UMITOOLS_EXTRACT.out.main.combine( BUILD_CUTADAPT_REF.out.fastas, 
-                                      by: 0 ) | CUTADAPT_DEMUX
+   UMITOOLS_EXTRACT.out.main
+      .combine( BUILD_CUTADAPT_REF.out.fastas, 
+                by: 0 ) 
+   | CUTADAPT_DEMUX
 
-   CUTADAPT_DEMUX.out.main | FASTQ2TAB | READS_PER_UMI_AND_PER_CLONE_AND_PER_GUIDE
+   CUTADAPT_DEMUX.out.main 
+   | FASTQ2TAB 
+   | READS_PER_UMI_AND_PER_CLONE_AND_PER_GUIDE
    
    FASTQ2TAB.out | UMITOOLS_COUNT_TAB
-   UMITOOLS_COUNT_TAB.out.main.combine( BUILD_CUTADAPT_REF.out.combos, 
-                                        by: 0 ) | COUNTS_PER_GUIDE
+   UMITOOLS_COUNT_TAB.out.main
+      .combine( BUILD_CUTADAPT_REF.out.combos, 
+                by: 0 ) 
+   | COUNTS_PER_GUIDE
 
-   COUNTS_PER_GUIDE.out.main.combine( READS_PER_UMI_AND_PER_CLONE_AND_PER_GUIDE.out, 
-                                      by: 0 ).combine( UMITOOLS_COUNT_TAB.out.main_to_plot,
-                                                       by: 0 ) | PLOTS
+   COUNTS_PER_GUIDE.out.main
+      .combine( READS_PER_UMI_AND_PER_CLONE_AND_PER_GUIDE.out, 
+                by: 0 )
+      .combine( UMITOOLS_COUNT_TAB.out.main_to_plot,
+                by: 0 ) 
+   | PLOTS
 
-   // TRIM_CUTADAPT.out.logs.concat(
-   //       CUTADAPT_DEMUX.out.logs,
-   //       FASTQC.out.logs )
-   //    .flatten()
-   //    .unique()
-   //    .collect() \
-   //    | MULTIQC
+   TRIM_CUTADAPT.out.logs
+      .concat(
+         CUTADAPT_DEMUX.out.logs,
+         FASTQC.out.logs )
+      .flatten()
+      .unique()
+      .collect()
+      | MULTIQC
 
 }
 
