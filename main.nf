@@ -169,17 +169,22 @@ workflow {
       .combine( READS_PER_UMI_AND_PER_CLONE_AND_PER_GUIDE.out, 
                 by: 0 )
       .combine( UMITOOLS_COUNT_TAB.out.main_to_plot,
-                by: 0 ) 
-   | PLOTS
+                by: 0 )
+      .set { plots_input }
+   plots_input | PLOTS
+   plots_input
+      .map { it[0..1] } 
+   | PLOT_READS_VS_UMIS
 
    TRIM_CUTADAPT.out.logs
       .concat(
-         CUTADAPT_DEMUX.out.logs,
-         FASTQC.out.logs )
+         CUTADAPT_DEMUX.out.multiqc_logs,
+         FASTQC.out.multiqc_logs 
+      )
       .flatten()
       .unique()
       .collect()
-      | MULTIQC
+   | MULTIQC
 
 }
 
@@ -187,7 +192,7 @@ workflow {
 // Do quality control checks
 process FASTQC {
 
-   label 'big_mem'
+   label 'med_mem'
 
    tag "${sample_id}" 
 
@@ -195,13 +200,20 @@ process FASTQC {
    tuple val( sample_id ), val( reference_id ), val( adapter ), val( umis ), path( reads )
 
    output:
-   path( "*.zip" ), emit: logs
+   tuple val( sample_id ), path ( "*.zip" ), emit: logs
+   path "*.zip", emit: multiqc_logs
 
    script:
    """
-   zcat ${reads} > ${sample_id}.fastqc.fastq
-   fastqc --noextract --memory 10000 --threads 8 ${sample_id}.fastqc.fastq
-   rm ${sample_id}.fastqc.fastq
+   zcat ${reads} > ${sample_id}.fastq
+   fastqc --noextract --memory 10000 --threads ${task.cpus} ${sample_id}.fastq
+   rm ${sample_id}.fastq
+   """
+   stub:
+   """
+   zcat ${reads} | head -n1000 > ${sample_id}.fastq
+   fastqc --noextract --memory 10000 --threads ${task.cpus} ${sample_id}.fastq
+   rm ${sample_id}.fastq
    """
 
 }
@@ -210,24 +222,26 @@ process FASTQC {
 // Trim adapters from reads
 process TRIM_CUTADAPT {
 
-   time '24h'
-
    tag "${sample_id}"
+
+   label 'big_cpu'
 
    publishDir( processed_o, 
                mode: 'copy' )
 
    input:
    tuple val( sample_id ), val( reference_id ), val( adapters ), val( umis ), path( reads, stageAs: "???/*" )
+   
    output:
    tuple val( sample_id ), val( reference_id ), val( adapters ), val( umis ), path( "*.trimmed.fastq.gz" ), emit: main
-   path "*.log", emit: logs
+   tuple val( sample_id ), path( "*.log" ), emit: logs
+   path "*.log", emit: multiqc_logs
 
    script:
    """
    for i in \$(seq 1 2)
    do
-      zcat */*_R"\$i"*.fastq.gz | gzip --best > ${sample_id}_3prime_R"\$i".fastq.gz
+      cat */*_R"\$i"*.fastq.gz > ${sample_id}_3prime_R"\$i".fastq.gz
    done
 
    cutadapt \
@@ -240,6 +254,7 @@ process TRIM_CUTADAPT {
 		--report full \
       --action trim \
 		--discard-untrimmed \
+      -j ${task.cpus} \
 		-o ${sample_id}_5prime_R1.fastq.gz \
       -p ${sample_id}_5prime_R2.fastq.gz \
 		${sample_id}_3prime_R?.fastq.gz \
@@ -252,6 +267,7 @@ process TRIM_CUTADAPT {
 		--report full \
       --action retain \
 		--discard-untrimmed \
+      -j ${task.cpus} \
 		-o ${sample_id}_R1.trimmed.fastq.gz \
       -p ${sample_id}_R2.trimmed.fastq.gz \
 		${sample_id}_5prime_R?.fastq.gz \
@@ -310,17 +326,14 @@ process UMITOOLS_EXTRACT {
 
    publishDir( processed_o, 
                mode: 'copy', 
-               pattern: "*.extract.log" )
-   publishDir( processed_o, 
-               mode: 'copy', 
-               pattern: "*.extracted.fastq.gz" )
+               pattern: "*.extract{.log,ed.fastq.gz}" )
 
    input:
    tuple val( sample_id ), val( reference_id ), val( adapter ), val( umis ), path( reads )
    // tuple val( sample_id ), val( reference_id ), val( adapter ), val( umis ), path( reads ), path ( whitelist )
    output:
    tuple val( reference_id ), val( sample_id ), path( "*.extracted.fastq.gz" ), emit: main
-   path( "*.log" ), emit: logs
+   tuple val( sample_id ), path( "*.log" ), emit: logs
 
    script:
    """
@@ -368,34 +381,39 @@ process BUILD_CUTADAPT_REF {
 
    for f in ${guideA} ${promoters} ${promoters}.rc.csv ${guideB}.rc.csv
    do
-      cat \$f | tr \$'\r' \$'\n' | grep -v '^\$' | sed 's/^/lib_1,/' \
+      cat \$f \
+      | tr \$'\r' \$'\n' \
+      | grep -v '^\$' \
+      | sed 's/^/lib_1,/' \
       > \$f.x.tsv
    done
 
    join -t, --header ${guideA}.x.tsv ${promoters}.x.tsv \
-      | cut -d, -f 2- \
-      > referenceA.csv
+   | cut -d, -f 2- \
+   > referenceA.csv
 
-   awk 'BEGIN{ FS=","; OFS=ARGV[1]; ARGV[1]="" }; NR>1 { print ">"\$1"|"\$3,\$2\$4 }' \$'\\n' referenceA.csv \
-      > referenceA.fasta
+   awk 'BEGIN{ FS=","; OFS=ARGV[1]; ARGV[1]="" }; NR>1 { print ">"\$1"|"\$3,\$2\$4 }' \$'\\n' \
+      referenceA.csv \
+   > referenceA.fasta
 
    join -t, --header ${promoters}.rc.csv.x.tsv ${guideB}.rc.csv.x.tsv \
       | cut -d, -f 2- \
-      > referenceB.csv
+   > referenceB.csv
    
-   awk 'BEGIN{ FS=","; OFS=ARGV[1]; ARGV[1]="" }; NR>1 { print ">"\$1"|"\$3,\$4\$2 }' \$'\\n' referenceB.csv \
-         > referenceB.fasta
+   awk 'BEGIN{ FS=","; OFS=ARGV[1]; ARGV[1]="" }; NR>1 { print ">"\$1"|"\$3,\$4\$2 }' \$'\\n' \
+      referenceB.csv \
+   > referenceB.fasta
 
    # generate all unique combos
    join -t, --header ${guideA}.x.tsv ${promoters}.x.tsv \
-      | join -t, --header - ${guideB}.rc.csv.x.tsv \
-      | cut -d, -f 2- \
-      > reference-combo.csv
+   | join -t, --header - ${guideB}.rc.csv.x.tsv \
+   | cut -d, -f 2- \
+   > reference-combo.csv
 
    cat \
       <(printf 'guide_name\\n') \
       <(awk 'BEGIN{ FS="," }; NR>1 { print \$1"|"\$3"@"\$3"|"\$5 }' reference-combo.csv) \
-      > reference-combo.txt
+   > reference-combo.txt
 
    """
 }
@@ -405,15 +423,11 @@ process CUTADAPT_DEMUX {
 
    tag "${sample_id}-${reference_id}" 
 
-   label 'big_mem'
-   time '6h'
+   label 'big_cpu'
 
    publishDir( path: mapped_o, 
                mode: 'copy', 
-               pattern: "*.fastq.gz" )
-   publishDir( path: mapped_o, 
-               mode: 'copy', 
-               pattern: "*.log" )
+               pattern: "*.{fastq.gz,log}" )
 
    input:
    tuple val( reference_id ), val( sample_id ), path( reads ), path( fastas )
@@ -428,7 +442,7 @@ process CUTADAPT_DEMUX {
 		-g '^file:${fastas[0]}' \
       -G '^file:${fastas[1]}' \
       -e 1 \
-      -j 0 \
+      -j ${task.cpus} \
       --no-indels \
 		--report full \
       --action lowercase \
@@ -464,16 +478,16 @@ process FASTQ2TAB {
       | tr ' ' \$'\t' \
       | cut -f1-2 \
       | sort -k2 \
-      > ${sample_id}.tab0.tsv
-   
-   # Hack because of bug in `umitools count_tab`. It expects read_id_UMI_CB 
-   # when `umitools extract` makes read_id_CB_UMI (!!!)
-   f=${sample_id}.tab0.tsv
-   paste <(paste -d_ <(cut -d_ -f1 \$f) <(cut -f1 \$f | cut -d_ -f3) <(cut -d_ -f2 \$f)) \
-      <(cut -f2 \$f) \
       > ${sample_id}.tab.tsv
+   
+   ## Hack because of bug in `umitools count_tab`. It expects read_id_UMI_CB 
+   ## when `umitools extract` makes read_id_CB_UMI (!!!)
+   #f=${sample_id}.tab0.tsv
+   #paste <(paste -d_ <(cut -d_ -f1 \$f) <(cut -f1 \$f | cut -d_ -f3) <(cut -d_ -f2 \$f)) \
+   #   <(cut -f2 \$f) \
+   #   > ${sample_id}.tab.tsv
 
-   rm \$f
+   #rm \$f
    """
 }
 
@@ -505,9 +519,10 @@ process UMITOOLS_COUNT_TAB {
       --stdout ${sample_id}.umitools_count0.tsv \
       --log ${sample_id}.umitools_count.log
 
-   tail -n+2 ${sample_id}.umitools_count0.tsv \
-      | sed 's/^b'\\''//;s/'\\''\\t/\\t/' \
-      > ${sample_id}.umitools_count0.tsv.tail
+   ## Hack for older versions of UMI-tools
+   #tail -n+2 ${sample_id}.umitools_count0.tsv \
+   #   | sed 's/^b'\\''//;s/'\\''\\t/\\t/' \
+   #   > ${sample_id}.umitools_count0.tsv.tail
    NLINES=\$(cat ${sample_id}.umitools_count0.tsv.tail | wc -l)
 
    printf 'clone_bc.guide_name\\tsample_id\\tclone_bc\\tguide_name\\tumi_count\\n' \
@@ -738,11 +753,48 @@ process PLOTS {
    """
 }
 
+
+process PLOT_READS_VS_UMIS {
+
+   tag "${sample_id}"
+
+   publishDir( counts_o, 
+               mode: 'copy' )
+
+   input:
+   tuple val( sample_id ), path( guide_umi_counts )
+
+   output:
+   tuple val( sample_id ), path( "*.png" )
+
+   script:
+   """
+   #!/usr/bin/env python
+
+   from carabiner.mpl import figsaver, scattergrid
+   import pandas as pd
+   
+   df = pd.read_csv(
+      "${guide_umi_counts}", 
+      sep='\\t',
+   ) 
+
+   fig, axes = scattergrid(
+      df,
+      grid_columns=["read_count", "umi_count"],
+      log=["read_count", "umi_count"]
+   )
+   figsaver()(
+      fig=fig,
+      name='${sample_id}.umi-vs-reads',
+   )
+   
+   """
+}
+
+
 // Make log report
 process MULTIQC {
-
-   label 'big_mem'
-   time '12 h'
 
    publishDir( multiqc_o, 
                mode: 'copy' )

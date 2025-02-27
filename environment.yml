@@ -10,8 +10,7 @@ dependencies:
     - bioconda::fastqc
     - pip:
         - 'cutadapt>=4.0'
-        - matplotlib
-        - 'multiqc>=1.21'
-        - numpy
-        - 'pandas>=2.1.2'
-        - 'umi_tools>=1.0'
+        - 'carabiner-tools[mpl,pd]==0.0.3.post1'
+        - 'cutadapt==5.0'
+        - 'multiqc==1.21'
+        - 'umi-tools==1.1.6'
